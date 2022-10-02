@@ -87,7 +87,6 @@ contract LunchBox is ReentrancyGuardUpgradeable,OwnableUpgradeable,AccessControl
         item.startDate = block.timestamp;
         item.betEnd = block.timestamp.add(time);
         item.endDate = block.timestamp.add(time*2);
-        item.pool = 0;
 
         bytes32 requestId = requestFirstBurnData();
         drawSetup[requestId] = DrawSetup({number:_number,bet:_burnBet,account:_account,drawId:currentDraw_id});
