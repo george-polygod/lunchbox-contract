@@ -2,6 +2,7 @@
 // solhint-disable not-rely-on-time
 pragma solidity ^0.8.4;
 
+
 import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
@@ -9,6 +10,7 @@ import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "./ILunchBox.sol";
+import "../Base64.sol";
 
 
 
@@ -27,6 +29,7 @@ contract LunchBox is ReentrancyGuardUpgradeable,OwnableUpgradeable,AccessControl
     uint256 public bnbFee; 
     uint256 public tax; // beeps
     uint256 public burnTax; // beeps
+    uint256 public totalBurned;
     address private dev;
 
 
@@ -52,7 +55,7 @@ contract LunchBox is ReentrancyGuardUpgradeable,OwnableUpgradeable,AccessControl
     function betOrder(
       uint256 _number,
       uint256 _burnBet
-    ) external  nonReentrant payable{
+    ) external override nonReentrant payable{
        Draw storage item = drawItems[currentDraw_id];
        if(block.timestamp >= item.betEnd)
        {
@@ -136,7 +139,7 @@ contract LunchBox is ReentrancyGuardUpgradeable,OwnableUpgradeable,AccessControl
 
     /* ========= DRAW RESULT ======== */
 
-    function checkDrawresult(uint256 _drawId) external nonReentrant payable{
+    function checkDrawresult(uint256 _drawId) external override nonReentrant payable{
         Draw storage item = drawItems[_drawId];
 
         require(msg.value >= bnbFee ,"Not enought BNBs"); 
@@ -145,7 +148,7 @@ contract LunchBox is ReentrancyGuardUpgradeable,OwnableUpgradeable,AccessControl
 
         if(item.endDateRequest == 0 || msg.sender == owner())
         {
-            bytes32 requestId = requestBurnData();
+            bytes32 requestId = requestBurnData(item.endDate);
             drawSetup[requestId].drawId = _drawId;
             drawSetup[requestId].account = msg.sender;
         }
@@ -156,10 +159,11 @@ contract LunchBox is ReentrancyGuardUpgradeable,OwnableUpgradeable,AccessControl
 
 
 
-    function requestBurnData() private returns (bytes32 requestId) 
+    function requestBurnData(uint256 _endDate) private returns (bytes32 requestId) 
     {
         Chainlink.Request memory request = buildChainlinkRequest(jobId, address(this), this.fulfill.selector);
-        string memory api = string(abi.encodePacked("https://earnz.directus.app/lunchbox/getData?time=",block.timestamp));
+        string memory api = string(abi.encodePacked("https://earnz.directus.app/lunchbox/getData?time=",Base64.uint2str(_endDate)));
+        
         request.add("get", api);
         request.add("path", "data,total_daily_burn"); 
         request.addInt("times", 10**2);
@@ -188,8 +192,9 @@ contract LunchBox is ReentrancyGuardUpgradeable,OwnableUpgradeable,AccessControl
         uint256 _pool = drawItems[_drawId].pool;
         uint256 burnTaxTotal = _pool.mul(burnTax).div(10**4);
         uint256 taxTotal = _pool.mul(tax).div(10**4);
-
+        
          _pool = _pool.sub(burnTaxTotal).sub(taxTotal);
+         totalBurned += burnTaxTotal;
 
          drawItems[_drawId].pool = _pool;
          if(burnTaxTotal > 0)
@@ -211,7 +216,7 @@ contract LunchBox is ReentrancyGuardUpgradeable,OwnableUpgradeable,AccessControl
 
  
 
-    function claimReward(uint256 _drawId,address account) public nonReentrant {
+    function claimReward(uint256 _drawId,address account)  public override nonReentrant {
         Draw storage item = drawItems[_drawId];
         require(item.result > 0 && block.timestamp >= item.endDate,"Result not yet available");
         require(userRewardPerTokenPaid[account][_drawId] == 0,"No Rewards");
@@ -226,14 +231,14 @@ contract LunchBox is ReentrancyGuardUpgradeable,OwnableUpgradeable,AccessControl
         }
     }
 
-    function pool(uint256 _drawId,uint256 _burn) public view  returns (uint256) {
+    function pool(uint256 _drawId,uint256 _burn) public view override returns (uint256) {
          Draw storage item = drawItems[_drawId];
          return item.bets[_burn];
     }
 
   
 
-    function payout(uint256 _drawId,uint256 _burn) public view  returns (uint256 reward) {
+    function payout(uint256 _drawId,uint256 _burn) public view override returns (uint256 reward) {
          Draw storage item = drawItems[_drawId];
          if(item.bets[_burn] > 0)
          {
@@ -244,12 +249,12 @@ contract LunchBox is ReentrancyGuardUpgradeable,OwnableUpgradeable,AccessControl
     }
 
 
-    function userOrder(address account,uint256 _drawId) public view  returns (uint256 number,uint256 bet) {
+    function userOrder(address account,uint256 _drawId) public view override returns (uint256 number,uint256 bet) {
          Draw storage item = drawItems[_drawId];
          return (item.orders[account].number,item.orders[account].bet);      
     }
 
-    function earned(address account,uint256 _drawId) public view  returns (uint256) {
+    function earned(address account,uint256 _drawId) public view override returns (uint256) {
          Draw storage item = drawItems[_drawId];
          if(item.bets[item.result] > 0 && item.orders[account].bet == item.result){
                 return  (item.pool).sub(burnTax).mul(10**18).div(item.bets[item.result]).mul(item.orders[account].number).div(10**18).sub(userRewardPerTokenPaid[account][_drawId]);
